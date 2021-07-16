@@ -2,20 +2,18 @@
 # Copyright 2019, 2021, Visual Computing Lab, ISTI - Italian National Research Council
 # SPDX-License-Identifier: BSL-1.0
 
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.10)
 project(MeshLab)
 
 ### Build options
 option(BUILD_MINI "Build only a minimal set of plugins" OFF)
-option(BUILD_SERVER "Build a command-line server application" OFF)
 option(BUILD_STRICT "Strictly enforce resolution of all symbols" ON)
 option(BUILD_WITH_DOUBLE_SCALAR "Use double type instead of float type for scalars" OFF)
 
 option(BUILD_ONLY_MESHLAB_LIBRARIES "Build only meshlab-common and plugins" OFF)
 option(USE_DEFAULT_BUILD_AND_INSTALL_DIRS "If set to OFF, it expects that you set manually the binary and install directories" ON)
 
-option(MESHLAB_IS_RELEASE_CANDIDATE_VERSION "" OFF)
-option(MESHLAB_IS_NIGHTLY_VERSION "" OFF)
+option(MESHLAB_IS_NIGHTLY_VERSION "Nightly version of meshlab will be used instead of ML_VERSION" OFF)
 
 ### Dependencies
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -95,7 +93,7 @@ else()
 	get_filename_component(VCGDIR "${CMAKE_CURRENT_LIST_DIR}/vcglib" ABSOLUTE)
 	if(EXISTS ${VCGDIR})
 		add_subdirectory(${VCGDIR})
-		message(STATUS "- VCGLib - using using bundled source")
+		message(STATUS "- VCGLib - using bundled source")
 	else()
 		set(VCGDIR NOTFOUND)
 	endif()
@@ -114,9 +112,6 @@ add_subdirectory(common)
 
 if (NOT BUILD_ONLY_MESHLAB_LIBRARIES)
 	add_subdirectory(meshlab)
-	if(BUILD_SERVER)
-		add_subdirectory(meshlabserver)
-	endif()
 	if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/use_cpu_opengl")
 		add_subdirectory(use_cpu_opengl)
 	endif()
@@ -144,8 +139,11 @@ if(NOT DEFINED MESHLAB_PLUGINS) # it may be already defined in parent directory
 			meshlabplugins/io_bre
 			meshlabplugins/io_collada
 			meshlabplugins/io_ctm
+			meshlabplugins/io_e57
 			meshlabplugins/io_expe
+			meshlabplugins/io_gltf
 			meshlabplugins/io_json
+			meshlabplugins/io_nxs
 			meshlabplugins/io_pdb
 			meshlabplugins/io_tri
 			meshlabplugins/io_txt
@@ -164,7 +162,6 @@ if(NOT DEFINED MESHLAB_PLUGINS) # it may be already defined in parent directory
 			meshlabplugins/filter_color_projection
 			meshlabplugins/filter_colorproc
 			meshlabplugins/filter_create
-			meshlabplugins/filter_csg
 			meshlabplugins/filter_dirt
 			meshlabplugins/filter_fractal
 			meshlabplugins/filter_func
@@ -172,6 +169,7 @@ if(NOT DEFINED MESHLAB_PLUGINS) # it may be already defined in parent directory
 			meshlabplugins/filter_isoparametrization
 			meshlabplugins/filter_layer
 			meshlabplugins/filter_measure
+			meshlabplugins/filter_mesh_booleans
 			meshlabplugins/filter_meshing
 			meshlabplugins/filter_mls
 			meshlabplugins/filter_mutualglobal
@@ -272,7 +270,7 @@ if (NOT BUILD_ONLY_MESHLAB_LIBRARIES)
 
 	if(NOT WIN32 AND NOT APPLE)
 		install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/Linux/resources/meshlab.desktop" DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
-		install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/meshlab.png" DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pixmaps)
+		install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/meshlab.png" DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps)
 	endif()
 
 endif()

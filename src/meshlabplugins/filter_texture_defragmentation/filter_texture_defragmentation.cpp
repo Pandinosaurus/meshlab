@@ -32,6 +32,8 @@
 #include <vcg/complex/algorithms/update/topology.h>
 #include <vcg/complex/algorithms/update/normal.h>
 
+#include <common/GLExtensionsManager.h>
+
 #include "TextureDefragmentation/src/mesh.h"
 #include "TextureDefragmentation/src/texture_object.h"
 #include "TextureDefragmentation/src/mesh_attribute.h"
@@ -50,11 +52,11 @@ FilterTextureDefragPlugin::FilterTextureDefragPlugin()
 	typeList = {
 	    FP_TEXTURE_DEFRAG,
 	};
-	
+
 	for(ActionIDType tt: types())
 		actionList.push_back(new QAction(filterName(tt), this));
 
-	LOG_INIT(logging::Level::Warning);
+	LOG_INIT(logging::Level::Error);
 	LOG_SET_THREAD_NAME("TextureDefrag");
 }
 
@@ -110,11 +112,22 @@ int FilterTextureDefragPlugin::getRequirements(const QAction *a)
 	return MeshModel::MM_NONE;
 }
 
+bool FilterTextureDefragPlugin::requiresGLContext(const QAction* a) const
+{
+	switch (ID(a)) {
+	case FP_TEXTURE_DEFRAG:
+		return true;
+	default:
+		assert(0);
+		return false;
+	}
+}
+
 int FilterTextureDefragPlugin::postCondition(const QAction *a) const
 {
 	switch (ID(a)) {
 	case FP_TEXTURE_DEFRAG:
-		return MeshModel::MM_WEDGTEXCOORD;
+		return MeshModel::MM_WEDGTEXCOORD | MeshModel::MM_GEOMETRY_AND_TOPOLOGY_CHANGE; // just to disable preview...
 	default:
 		assert(0);
 	}
@@ -132,8 +145,9 @@ FilterTextureDefragPlugin::FilterClass FilterTextureDefragPlugin::getClass(const
 	return FilterPlugin::Generic;
 }
 
-void FilterTextureDefragPlugin::initParameterList(const QAction *action, MeshDocument &md, RichParameterList & parlst)
+RichParameterList FilterTextureDefragPlugin::initParameterList(const QAction *action, const MeshDocument &)
 {
+	RichParameterList parlst;
 	switch (ID(action)) {
 	case FP_TEXTURE_DEFRAG:
 		parlst.addParam(RichFloat(
@@ -157,6 +171,14 @@ void FilterTextureDefragPlugin::initParameterList(const QAction *action, MeshDoc
 		                    0.025,
 		                    "Global ARAP distortion tolerance",
 		                    "Global ARAP distortion tolerance when merging a seam. If the global atlas energy is higher than this value, the operation is reverted."));
+		parlst.addParam(RichDynamicFloat(
+		                    "uvReductionLimit",
+		                    0.0,
+		                    0.0,
+		                    100.0,
+		                    "UV Length Target (percentage)",
+							"Target UV length as percentage of the input length. The algorithm halts if the target UV length has be    en reached, or if no further "
+		                    "seams can be merged."));
 		parlst.addParam(RichFloat(
 		                    "offsetFactor",
 		                    5.0,
@@ -172,6 +194,7 @@ void FilterTextureDefragPlugin::initParameterList(const QAction *action, MeshDoc
 	default:
 		break;
 	}
+	return parlst;
 }
 
 // The Real Core Function doing the actual mesh processing.
@@ -182,12 +205,20 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
         unsigned int& /*postConditionMask*/,
         CallBackPos *cb)
 {
-	MeshModel &mm = *(md.mm());
+	const MeshModel &currentModel = *(md.mm());
 	switch(ID(filter)) {
 	case FP_TEXTURE_DEFRAG:
 	{
-		if (mm.fullName().isEmpty())
-			throw MLException("Mesh must be saved to disk before proceeding.");
+		cb(0, "Initializing layer...");
+
+		MeshModel& mm = *(md.addNewMesh(md.mm()->cm, "texdefrag_" + currentModel.label()));
+		mm.updateDataMask(&currentModel);
+
+		QString path = currentModel.pathName();
+
+		tri::Clean<CMeshO>::RemoveZeroAreaFace(mm.cm);
+		tri::Clean<CMeshO>::RemoveDuplicateVertex(mm.cm);
+		tri::Allocator<CMeshO>::CompactEveryVector(mm.cm);
 
 		tri::UpdateTopology<CMeshO>::FaceFace(mm.cm);
 		if (tri::Clean<CMeshO>::CountNonManifoldEdgeFF(mm.cm) > 0)
@@ -195,9 +226,7 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
 
 		// switch working directory
 		QDir wd = QDir::current();
-		QDir::setCurrent(mm.pathName());
-
-		tri::Allocator<CMeshO>::CompactEveryVector(mm.cm);
+		QDir::setCurrent(path);
 
 		// build mesh object
 		Mesh defragMesh;
@@ -227,13 +256,8 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
 		// build textureobjecthandle object
 		TextureObjectHandle textureObject = std::make_shared<TextureObject>();
 
-		for (const string& textureName : mm.cm.textures) {
-			QFileInfo textureFile(textureName.c_str());
-			textureFile.makeAbsolute();
-			if (!textureFile.exists() || !textureFile.isReadable())
-				throw MLException((std::string("Texture file ") + textureName.c_str() + std::string(" does not exist or is not readable.")).c_str());
-
-			textureObject->AddImage(textureFile.absoluteFilePath().toStdString());
+		for (const string& textureName : currentModel.cm.textures) {
+			textureObject->AddImage(currentModel.getTexture(textureName));
 		}
 
 		AlgoParameters ap;
@@ -242,7 +266,7 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
 		ap.boundaryTolerance = par.getFloat("boundaryTolerance");
 		ap.distortionTolerance = par.getFloat("distortionTolerance");
 		ap.globalDistortionThreshold = par.getFloat("globalDistortionTolerance");
-		ap.UVBorderLengthReduction = 0.0;
+		ap.UVBorderLengthReduction = par.getFloat("uvReductionLimit") / 100.0f;
 		ap.offsetFactor = par.getFloat("offsetFactor");
 		ap.timelimit = par.getFloat("timelimit");
 
@@ -253,23 +277,21 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
 		ScaleTextureCoordinatesToImage(defragMesh, textureObject);
 
 		// setup proxy mesh
-		{
-			Compute3DFaceAdjacencyAttribute(defragMesh);
-
-			CutAlongSeams(defragMesh);
-			tri::Allocator<Mesh>::CompactEveryVector(defragMesh);
-
-			tri::UpdateTopology<Mesh>::FaceFace(defragMesh);
-			while (tri::Clean<Mesh>::SplitNonManifoldVertex(defragMesh, 0))
-				;
-			tri::UpdateTopology<Mesh>::VertexFace(defragMesh);
-
-			tri::Allocator<Mesh>::CompactEveryVector(defragMesh);
-		}
-
-		ComputeWedgeTexCoordStorageAttribute(defragMesh);
+		Compute3DFaceAdjacencyAttribute(defragMesh);
+		CutAlongSeams(defragMesh);
 
 		GraphHandle graph = ComputeGraph(defragMesh, textureObject);
+
+		while (tri::Clean<Mesh>::SplitNonManifoldVertex(defragMesh, 0))
+			;
+		tri::Allocator<Mesh>::CompactEveryVector(defragMesh);
+
+		DisconnectCharts(graph);
+		tri::UpdateTopology<Mesh>::FaceFace(defragMesh);
+		tri::UpdateTopology<Mesh>::VertexFace(defragMesh);
+
+
+		ComputeWedgeTexCoordStorageAttribute(defragMesh);
 
 		std::map<RegionID, bool> flipped;
 		for (auto& c : graph->charts)
@@ -294,7 +316,7 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
 		if (colorize)
 			tri::UpdateColor<Mesh>::PerFaceConstant(defragMesh, vcg::Color4b(91, 130, 200, 255));
 
-		for (auto entry : graph->charts) {
+		for (auto& entry : graph->charts) {
 			ChartHandle chart = entry.second;
 			double zeroResamplingChartArea;
 			int anchor = RotateChartForResampling(chart, state->changeSet, flipped, colorize, &zeroResamplingChartArea);
@@ -303,7 +325,7 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
 			}
 		}
 
-		cb(70, "Packing new atlas...");
+		cb(70, "Packing atlas...");
 		// clear texture coordinates of empty-area charts
 		std::vector<ChartHandle> chartsToPack;
 		for (auto& entry : graph->charts) {
@@ -321,6 +343,16 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
 			}
 		}
 
+		// Set non-manifold edges as border, otherwise outline extraction fails
+		for (auto& f : graph->mesh.face) {
+			for (int i = 0; i < 3; ++i) {
+				if (!face::IsManifold(f, i)) {
+					f.FFp(i) = &f;
+					f.FFi(i) = i;
+				}
+			}
+		}
+
 		std::vector<TextureSize> texszVec;
 		int npacked = Pack(chartsToPack, textureObject, texszVec);
 
@@ -332,7 +364,10 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
 
 		IntegerShift(defragMesh, chartsToPack, texszVec, anchorMap, flipped);
 
+		glContext->makeCurrent();
+		GLExtensionsManager::initializeGLextensions();
 		std::vector<std::shared_ptr<QImage>> newTextures = RenderTexture(defragMesh, textureObject, texszVec, true, RenderMode::Linear);
+		glContext->doneCurrent();
 
 		// Copy wedge tex coords from defragMesh to cm
 		if (mm.cm.FN() != defragMesh.FN())
@@ -348,18 +383,13 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
 
 		// save and assign textures
 		cb(90, "Saving textures...");
-		mm.cm.textures.clear();
+		mm.clearTextures();
 
 		const char *imageFormat = "png";
-		const int quality = 66;
-		std::string textureBase = QFileInfo(mm.fullName()).baseName().toStdString() + "_optimized_texture_";
+		QString textureBase = mm.label() + "_optimized_texture_";
 		for (unsigned i = 0; i < newTextures.size(); ++i) {
-			std::string tname = textureBase + std::to_string(i) + "." + imageFormat;
-			if (!newTextures[i]->save(tname.c_str(), imageFormat, quality)) {
-				std::string err = "Texture file " + tname + " cannot be saved on disk";
-				throw MLException(err.c_str());
-			}
-			mm.cm.textures.push_back(tname);
+			QString tname = textureBase + QString(std::to_string(i).c_str()) + "." + imageFormat;
+			mm.addTexture(tname.toStdString(), *newTextures[i]);
 		}
 
 		cb(100, "Done!");
@@ -372,7 +402,7 @@ std::map<std::string, QVariant> FilterTextureDefragPlugin::applyFilter(
 	default:
 		wrongActionCalled(filter);
 	}
-	
+
 	return std::map<std::string, QVariant>();
 }
 

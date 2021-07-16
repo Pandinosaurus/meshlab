@@ -1,15 +1,13 @@
 #version management
 string(TIMESTAMP MESHLAB_VERSION "%Y.%m")
-if (MESHLAB_IS_RELEASE_CANDIDATE_VERSION AND MESHLAB_IS_NIGHTLY_VERSION)
-	message(FATAL_ERROR "Both nightly and release candidate options are set to ON. Choose one.")
-endif()
+
 if (MESHLAB_IS_NIGHTLY_VERSION)
 	# nightly version is in the form:
 	# YYYY.mm[d]_nightly_GIT_SHA1
 	# YYYY and mm are computed by cmake and not read from file
 	find_package(Git)
 	execute_process(COMMAND
-		"${GIT_EXECUTABLE}" describe --match=NeVeRmAtCh --always --abbrev=6
+		"${GIT_EXECUTABLE}" describe --match=NeVeRmAtCh --always --abbrev=7
 		WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
 		OUTPUT_VARIABLE GIT_SHA1
 		ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -23,14 +21,11 @@ else()
 		file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../../ML_VERSION" MESHLAB_VERSION)
 	endif()
 	# if double precision version, "d" is appended
-	# if release candidate, "_rc" is appended
 	if (BUILD_WITH_DOUBLE_SCALAR)
 		set(MESHLAB_VERSION "${MESHLAB_VERSION}d")
 	endif()
-	if (MESHLAB_IS_RELEASE_CANDIDATE_VERSION)
-		set(MESHLAB_VERSION "${MESHLAB_VERSION}_rc")
-	endif()
 endif()
+set(MESHLAB_VERSION ${MESHLAB_VERSION} PARENT_SCOPE)
 message(STATUS "MeshLab version: ${MESHLAB_VERSION}")
 
 if (BUILD_WITH_DOUBLE_SCALAR)
@@ -76,15 +71,13 @@ set(HEADERS
 	python/function_parameter.h
 	python/function_set.h
 	python/python_utils.h
+	utilities/eigen_mesh_conversions.h
 	utilities/file_format.h
 	utilities/load_save.h
 	globals.h
 	GLExtensionsManager.h
 	GLLogStream.h
 	filterscript.h
-	mainwindow_interface.h
-	meshlabdocumentbundler.h
-	meshlabdocumentxml.h
 	ml_selection_buffers.h
 	ml_thread_safe_memory_info.h
 	mlapplication.h
@@ -120,22 +113,20 @@ set(SOURCES
 	python/function_parameter.cpp
 	python/function_set.cpp
 	python/python_utils.cpp
+	utilities/eigen_mesh_conversions.cpp
 	utilities/load_save.cpp
 	globals.cpp
 	GLExtensionsManager.cpp
 	GLLogStream.cpp
 	filterscript.cpp
-	meshlabdocumentbundler.cpp
-	meshlabdocumentxml.cpp
 	ml_selection_buffers.cpp
 	ml_thread_safe_memory_info.cpp
 	mlapplication.cpp
 	searcher.cpp)
 
+set(RESOURCES meshlab-common.qrc)
+
 set(TARGET_TYPE SHARED)
-if(WIN32)
-	set(TARGET_TYPE STATIC)
-endif()
 add_library(meshlab-common ${TARGET_TYPE} ${SOURCES} ${HEADERS} ${RESOURCES})
 
 target_compile_definitions(meshlab-common
@@ -169,8 +160,12 @@ set_property(TARGET meshlab-common
 	PROPERTY LIBRARY_OUTPUT_DIRECTORY ${MESHLAB_LIB_OUTPUT_DIR})
 
 if (WIN32)
+	add_compile_definitions(meshlab-common PRIVATE ML_EXPORT_SYMBOLS)
 	set_property(TARGET meshlab-common
 		PROPERTY ARCHIVE_OUTPUT_DIRECTORY ${MESHLAB_LIB_OUTPUT_DIR})
 endif()
+
+set_target_properties(meshlab-common PROPERTIES
+	INSTALL_RPATH "${MESHLAB_LIB_INSTALL_DIR}:${INSTALL_RPATH}")
 
 install(TARGETS meshlab-common DESTINATION ${MESHLAB_LIB_INSTALL_DIR})

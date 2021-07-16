@@ -49,15 +49,17 @@ class FilterTextureDefragPlugin : public QObject, public FilterPlugin
 	FilterTextureDefragPlugin();
 
 	QString pluginName() const;
-	virtual QString filterName(ActionIDType filter) const;
-	virtual QString filterInfo(ActionIDType filter) const;
-	virtual void initParameterList(const QAction*, MeshDocument &/*m*/, RichParameterList & /*parent*/);
-	std::map<std::string, QVariant> applyFilter(const QAction* action,
-	                                            const RichParameterList & parameters,
-	                                            MeshDocument &md,
-	                                            unsigned int& postConditionMask,
-	                                            vcg::CallBackPos * cb);
+	QString filterName(ActionIDType filter) const;
+	QString filterInfo(ActionIDType filter) const;
+	RichParameterList initParameterList(const QAction*, const MeshDocument &/*m*/);
+	std::map<std::string, QVariant> applyFilter(
+			const QAction* action,
+			const RichParameterList & parameters,
+			MeshDocument &md,
+			unsigned int& postConditionMask,
+			vcg::CallBackPos * cb);
 	virtual int getRequirements(const QAction*);
+	bool requiresGLContext(const QAction*) const;
 	virtual int getPreConditions(const QAction*) const;
 	virtual int postCondition(const QAction* ) const;
 	FilterClass getClass(const QAction *a) const;

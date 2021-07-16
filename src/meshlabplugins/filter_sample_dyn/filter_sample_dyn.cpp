@@ -87,7 +87,7 @@ FilterPlugin::FilterClass ExtraSampleDynPlugin::getClass(const QAction *) const 
 // 
 // In this sample a couple of parameter are declared as dynamic. That means that the meshlab framework will automatically 
 // manage the store and restore of the mesh state during the dynamic movement of the filter. 
-// The pluging writer is no more burdened with the task of saving the state but has only to declare what the filter changes 
+// The plugin writer is no more burdened with the task of saving the state but has only to declare what the filter changes 
 // (in this case just the vertex color). When a filter is dynamic (e.g. it has a dynamic float parameter) the meshlab 
 // framework will automatically store that part of the state at the opening of the dialog. When the user drag the slider,
 // the framework will restore the state and then simply call the apply callback of the filter. 
@@ -96,8 +96,9 @@ FilterPlugin::FilterClass ExtraSampleDynPlugin::getClass(const QAction *) const 
 // when the user press apply the current stored state is updated. 
 // when the user press close the mesh state is restored to the one before the startup of the filter.
 
-void ExtraSampleDynPlugin::initParameterList(const QAction *action,MeshModel &/*m*/, RichParameterList & parlst)
+RichParameterList ExtraSampleDynPlugin::initParameterList(const QAction *action,const MeshModel &/*m*/)
 {
+	RichParameterList parlst;
 	switch(ID(action))	 {
 	case FP_VERTEX_COLOR_NOISE :
 		parlst.addParam(RichColor ("baseColor",
@@ -118,6 +119,7 @@ void ExtraSampleDynPlugin::initParameterList(const QAction *action,MeshModel &/*
 
 	default: break; // do not add any parameter for the other filters
 	}
+	return parlst;
 }
 
 // The Real Core Function doing the actual mesh processing.
